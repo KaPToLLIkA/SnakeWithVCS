@@ -1,4 +1,4 @@
-import threading
+import pygame
 
 from state import State
 
@@ -12,7 +12,7 @@ def safe_read_int(msg):
 
 
 class Commit:
-    def __init__(self, push, pop, score_d, direction, food_pos, parent_id, id):
+    def __init__(self, push=[-1, -1], pop=[-1, -1], score_d=0, direction=0, food_pos=[-1, -1], parent_id=-1, id=0):
         self.pop = pop
         self.push = push
         self.score_d = score_d
@@ -22,36 +22,61 @@ class Commit:
         self.direction = direction
         self.food_pos = food_pos
 
+    def write(self, out_stream):
+        l = [
+            self.pop[0], self.pop[1],
+            self.push[0], self.push[1],
+            self.score_d,
+            self.parent_id,
+            self.id,
+            self.direction,
+            self.food_pos[0], self.food_pos[1],
+            *self.child_ids
+        ]
+        out_stream.write(','.join(list(map(lambda x: str(x), l))))
 
-class Git (threading.Thread):
+    @staticmethod
+    def parse(c_str: str):
+        c = Commit()
+        data = list(map(lambda x: int(x), c_str.split(',')))
+        c.pop = [data[0], data[1]]
+        c.push = [data[2], data[3]]
+        c.score_d = data[4]
+        c.parent_id = data[5]
+        c.id = data[6]
+        c.direction = data[7]
+        c.food_pos = [data[8], data[9]]
+        c.child_ids = data[10:]
+        return c
+
+
+class Git:
     def __init__(self):
-        super().__init__()
-        self.commits = [Commit(push=None, pop=None, score_d=0, direction=None, food_pos=None, parent_id=None, id=0)]
+        self.commits = [Commit()]
         self.head_id = 0
         self.git = 'git.dt'
         self.git_ls = 'git_ls.dt'
         self.branch_ids = [0]
+        self.__read()
+        self.log(["--all"])
 
-    def run(self):
-        while not State.exit:
-            cmd = input('Command: ')
-            State.paused = True
-            self.proc_cmd(cmd)
+        if len(self.commits) > 1:
+            self.restore_state_with_id(self.head_id)
 
-    def proc_cmd(self, cmd):
-        cmds = cmd.split(' ')
-
-        if cmds.__len__() == 0:
-            print('[ERR-] Supported commands only: log, undo, redo.')
-
-        if cmds[0] == 'log':
-            self.log(cmds[1:])
-        elif cmds[0] == 'undo':
-            self.undo()
-        elif cmds[0] == 'redo':
-            self.redo()
-        else:
-            print('[ERR-] Supported commands only: log, undo, redo.')
+    def proc_engine_input(self, event):
+        if State.git_key_pressed:
+            if event.key == pygame.K_u:
+                State.paused = True
+                self.undo()
+            elif event.key == pygame.K_r:
+                State.paused = True
+                self.redo()
+            elif event.key == pygame.K_f:
+                State.paused = True
+                self.log(["--all"])
+            elif event.key == pygame.K_c:
+                State.paused = True
+                self.log(["--cur"])
 
     def log(self, cmds: list):
         if len(cmds) == 0:
@@ -73,7 +98,7 @@ class Git (threading.Thread):
             print('[ERR-] Where args? --all or --cur')
 
     def undo(self):
-        if self.commits[self.head_id].parent_id is None:
+        if self.commits[self.head_id].parent_id == -1:
             print('[INFO] The root of the tree has been reached')
         else:
             commit = self.commits[self.head_id]
@@ -120,6 +145,7 @@ class Git (threading.Thread):
                   f'{cc.id}, {cc.push}, {cc.pop}, {cc.score_d}, {cc.direction}, {cc.food_pos}, {cc.child_ids}')
 
     def commit(self, push, pop, score_d, direction, food_pos):
+        self.save_current_state()
         new_commit = Commit(push=push,
                             pop=pop,
                             score_d=score_d,
@@ -136,11 +162,44 @@ class Git (threading.Thread):
         self.head_id = new_commit.id
         self.commits.append(new_commit)
 
+    def save_current_state(self):
+        with open(self.git_ls, 'a') as f:
+            f.write(f'{self.head_id},{State.to_str()}\n')
+
+    def restore_state_with_id(self, s_id):
+        try:
+            print(f'[INFO] Try to restore {s_id}.')
+            with open(self.git_ls, 'r') as f:
+                for line in f:
+                    data = list(map(lambda x: int(x), line.split(',')))
+                    if data[0] == s_id - 1:
+                        print('[INFO] restoring...')
+                        State.from_list(data[1:])
+                        return
+        except FileNotFoundError:
+            pass
+
+    def __read_header(self, input_stream):
+        self.head_id = int(input_stream.readline())
+        self.branch_ids = list(map(lambda x: int(x), input_stream.readline().split(',')))
+
+    def __write_header(self, out_stream):
+        out_stream.write(str(self.head_id) + '\n')
+        out_stream.write(','.join(map(lambda x: str(x), self.branch_ids)) + '\n')
+
     def __read(self):
-        pass
+        try:
+            with open(self.git, 'r') as f:
+                self.__read_header(f)
+                self.commits.clear()
+                for line in f:
+                    self.commits.append(Commit.parse(line))
+        except FileNotFoundError:
+            pass
 
-    def __write(self):
-        pass
-
-    def __del__(self):
-        self.__write()
+    def write(self):
+        with open(self.git, 'w') as f:
+            self.__write_header(f)
+            for c in self.commits:
+                c.write(f)
+                f.write('\n')

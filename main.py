@@ -16,7 +16,6 @@ else:
 
 
 git = Git()
-git.start()
 
 
 class Colors:
@@ -37,8 +36,6 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 State.exit = True
-                pygame.display.quit()
-                sys.exit()
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_UP or event.key == ord('w'):
                     if State.direction != 'D':
@@ -56,6 +53,12 @@ class Game:
                     pygame.event.post(pygame.event.Event(pygame.QUIT))
                 if event.key == pygame.K_p and not Game.check_game_over():
                     State.paused = not State.paused
+                if event.key == pygame.K_g:
+                    State.git_key_pressed = True
+                git.proc_engine_input(event)
+            elif event.type == pygame.KEYUP:
+                if event.key == pygame.K_g:
+                    State.git_key_pressed = False
 
     @staticmethod
     def game_tick():
@@ -90,7 +93,7 @@ class Game:
             ]
             delta_food_pos = [next_food_pos[0] - State.food_pos[0], next_food_pos[1] - State.food_pos[1]]
             State.food_pos = next_food_pos
-            git.commit(push=list(State.snake_pos), pop=None, food_pos=delta_food_pos, direction=d_index, score_d=1)
+            git.commit(push=list(State.snake_pos), pop=[-1, -1], food_pos=delta_food_pos, direction=d_index, score_d=1)
         else:
             popped = State.snake_body.pop()
             git.commit(push=list(State.snake_pos), pop=popped, food_pos=[0, 0], direction=d_index, score_d=0)
@@ -149,4 +152,6 @@ while not State.exit:
     pygame.display.update()
     Game.fps_controller.tick(difficulty)
 
-
+pygame.display.quit()
+git.write()
+print("exited")
